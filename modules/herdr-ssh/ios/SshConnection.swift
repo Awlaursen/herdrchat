@@ -66,6 +66,12 @@ struct SshFailure: Error {
 actor SshConnection {
   private let config: SshConfigRecord
   private var client: SSHClient?
+  private var tailscale: TailscaleSession?
+  private var tailscaleDial: Task<TailscaleSession, Error>?
+  private var tailscaleControl: SshDialControl?
+  private var generation = 0
+  private var activeAuthAttempt: String?
+  private let onAuth: @Sendable (String, String, String?) -> Void
   /// The dial in progress, shared by every caller that finds no client.
   ///
   /// Actors are reentrant: while one call awaits `SSHClient.connect`, others
@@ -85,12 +91,19 @@ actor SshConnection {
   private var pathMonitorStarted = false
   private var pathSignature: String?
 
-  init(config: SshConfigRecord) {
+  init(config: SshConfigRecord,
+       onAuth: @escaping @Sendable (String, String, String?) -> Void = { _, _, _ in }) {
+    self.onAuth = onAuth
     self.config = config
     self.hostKeyPin = HostKeyPin(config.hostKeyFingerprint)
   }
 
   // MARK: - Lifecycle
+
+  func cancelAuth(_ attempt: String) async {
+    guard activeAuthAttempt == attempt else { return }
+    await resetClient()
+  }
 
   func close() async {
     await resetClient()
@@ -104,6 +117,14 @@ actor SshConnection {
   /// afterwards could discard a client another call dialled in the meantime,
   /// leaving that connection open with nothing holding it.
   private func resetClient() async {
+    generation += 1
+    tailscaleDial?.cancel()
+    tailscaleControl?.cancel()
+    tailscaleDial = nil
+    tailscaleControl = nil
+    let oldTailscale = tailscale
+    tailscale = nil
+    if let oldTailscale { await oldTailscale.close() }
     let old = client
     client = nil
     connecting = nil
@@ -142,8 +163,60 @@ actor SshConnection {
 
   // MARK: - Connecting
 
-  @discardableResult
-  func connected() async throws -> SSHClient {
+  func connected() async throws {
+    if config.authKind == "tailscale" { _ = try await tailscaleClient() }
+    else { _ = try await citadelClient() }
+  }
+
+  private func tailscaleClient() async throws -> TailscaleSession {
+    startPathMonitorIfNeeded()
+    if let tailscale, tailscale.isConnected { return tailscale }
+    if let tailscaleDial { return try await tailscaleDial.value }
+    if let tailscale { await tailscale.close(); self.tailscale = nil }
+    let epoch = generation
+    let control = SshDialControl()
+    tailscaleControl = control
+    let observer = HostKeyObserver(pin: hostKeyPin)
+    let attempt = UUID().uuidString
+    activeAuthAttempt = attempt
+    let task = Task { [config, onAuth] in
+      onAuth(attempt, "started", nil)
+      defer {
+        if activeAuthAttempt == attempt { activeAuthAttempt = nil }
+        onAuth(attempt, "finished", nil)
+      }
+      do {
+        return try await TailscaleSession.connect(
+          host: config.host, port: config.port, username: config.username,
+          validator: TOFUHostKeyDelegate(observer: observer), control: control,
+          onBanner: { onAuth(attempt, "banner", $0) }
+        )
+      } catch {
+        if observer.mismatched {
+          throw SshFailure(code: "host_key_changed", message: "This host's SSH key has changed since you saved it.",
+                           presentedFingerprint: observer.presented)
+        }
+        if let failure = error as? SshFailure { throw failure }
+        throw SshFailure.connect(error)
+      }
+    }
+    tailscaleDial = task
+    do {
+      let result = try await task.value
+      guard generation == epoch else {
+        await result.close()
+        throw SshFailure(code: "auth_cancelled", message: "The SSH connection was cancelled. Try again.")
+      }
+      tailscaleDial = nil
+      tailscale = result
+      return result
+    } catch {
+      if generation == epoch { tailscaleDial = nil; tailscaleControl = nil }
+      throw error
+    }
+  }
+
+  private func citadelClient() async throws -> SSHClient {
     startPathMonitorIfNeeded()
     // A dead cached client (dropped TCP) must not be reused.
     if let client {
@@ -294,6 +367,8 @@ actor SshConnection {
   /// the caller decides what exit 127 means. Never replay a failed command:
   /// the host may have applied it before its reply was lost.
   func exec(_ command: String, timeoutMs: Int) async throws -> CommandOutput {
+    // Browser approval has its own deadline, separate from command execution.
+    try await connected()
     do {
       return try await withDeadline(timeoutMs) { try await self.execOnce(command) }
     } catch let failure as SshFailure {
@@ -339,7 +414,23 @@ actor SshConnection {
   }
 
   private func execOnce(_ command: String) async throws -> CommandOutput {
-    let client = try await connected()
+    if config.authKind == "tailscale" {
+      let session = try await tailscaleClient()
+      var stdout = ByteBuffer()
+      var stderr = ByteBuffer()
+      do {
+        try await session.readCommand(command, onStart: {}) { chunk in
+          switch chunk {
+          case .stdout(let data): stdout.writeImmutableBuffer(data)
+          case .stderr(let data): stderr.writeImmutableBuffer(data)
+          }
+        }
+        return CommandOutput(stdout: string(stdout), stderr: string(stderr), exitCode: 0)
+      } catch let failure as TailscaleCommandFailed {
+        return CommandOutput(stdout: string(stdout), stderr: string(stderr), exitCode: failure.exitCode)
+      }
+    }
+    let client = try await citadelClient()
     var stdout = ByteBuffer()
     var stderr = ByteBuffer()
     do {
@@ -372,11 +463,26 @@ actor SshConnection {
     onEnd: @escaping @Sendable (Int) -> Void,
     onError: @escaping @Sendable (String, String) -> Void
   ) async throws -> Task<Void, Never> {
+    try await connected()
     let ready = AsyncThrowingStream<Void, Error>.makeStream()
     let task = Task {
       var buffer = Data()
       do {
-        let client = try await connected()
+        if config.authKind == "tailscale" {
+          let session = try await tailscaleClient()
+          try await session.readCommand(command, onStart: { ready.continuation.finish() }) { chunk in
+            guard case .stdout(let data) = chunk else { return }
+            buffer.append(contentsOf: data.readableBytesView)
+            while let newline = buffer.firstIndex(of: 0x0A) {
+              onLine(String(decoding: buffer[buffer.startIndex..<newline], as: UTF8.self))
+              buffer.removeSubrange(buffer.startIndex...newline)
+            }
+          }
+          if !buffer.isEmpty { onLine(String(decoding: buffer, as: UTF8.self)) }
+          onEnd(0)
+          return
+        }
+        let client = try await citadelClient()
         // Citadel's plain executeCommandStream has no cancellation cleanup.
         // withExec owns the channel and closes it when this task is cancelled.
         var started = false
@@ -409,6 +515,10 @@ actor SshConnection {
           onLine(String(decoding: buffer, as: UTF8.self))
         }
         onEnd(0)
+      } catch let failed as TailscaleCommandFailed {
+        ready.continuation.finish(throwing: failed)
+        if !buffer.isEmpty { onLine(String(decoding: buffer, as: UTF8.self)) }
+        onEnd(failed.exitCode)
       } catch let failed as SSHClient.CommandFailed {
         ready.continuation.finish(throwing: failed)
         if !buffer.isEmpty { onLine(String(decoding: buffer, as: UTF8.self)) }

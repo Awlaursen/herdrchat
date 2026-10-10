@@ -94,7 +94,12 @@ export class SshHerdrTransport implements HerdrTransport {
           };
         });
     }
-    return this.opening;
+    const opening = this.opening;
+    try {
+      return await opening;
+    } finally {
+      if (this.opening === opening) this.opening = null;
+    }
   }
 
   /**

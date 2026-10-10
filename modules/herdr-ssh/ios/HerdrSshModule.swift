@@ -31,21 +31,30 @@ public class HerdrSshModule: Module {
   public func definition() -> ModuleDefinition {
     Name("HerdrSsh")
 
-    Events("onStreamLine", "onStreamEnd", "onStreamError")
+    Events("onStreamLine", "onStreamEnd", "onStreamError", "onAuth")
 
     AsyncFunction("connect") { (id: String, config: SshConfigRecord) -> [String: Any] in
+      let connection = await self.connections.connection(for: id, config: config) { [weak self] attempt, phase, message in
+        var event: [String: Any] = ["connectionId": id, "attemptId": attempt,
+                                   "host": config.host, "username": config.username, "phase": phase]
+        if let message { event["message"] = message }
+        self?.sendEvent("onAuth", event)
+      }
       do {
-        let connection = await self.connections.connection(for: id, config: config)
         try await connection.connected()
         let fingerprint = await connection.acceptedFingerprint ?? ""
         return ["ok": true, "fingerprint": fingerprint]
       } catch let failure as SshFailure {
-        await self.connections.drop(id)
+        await self.connections.drop(id, ifSame: connection)
         return failureMap(failure)
       } catch {
-        await self.connections.drop(id)
+        await self.connections.drop(id, ifSame: connection)
         return ["ok": false, "code": "connect_failed", "message": SshFailure.friendly(error)]
       }
+    }
+
+    AsyncFunction("cancelAuth") { (id: String, attempt: String) in
+      await self.connections.existing(id)?.cancelAuth(attempt)
     }
 
     AsyncFunction("disconnect") { (id: String) in
@@ -129,9 +138,10 @@ actor ConnectionStore {
   private var connections: [String: SshConnection] = [:]
   private var streams: [String: Task<Void, Never>] = [:]
 
-  func connection(for id: String, config: SshConfigRecord) -> SshConnection {
+  func connection(for id: String, config: SshConfigRecord,
+                  onAuth: @escaping @Sendable (String, String, String?) -> Void) -> SshConnection {
     if let existing = connections[id] { return existing }
-    let created = SshConnection(config: config)
+    let created = SshConnection(config: config, onAuth: onAuth)
     connections[id] = created
     return created
   }
@@ -152,7 +162,8 @@ actor ConnectionStore {
     streams.removeValue(forKey: streamId)?.cancel()
   }
 
-  func drop(_ id: String) async {
+  func drop(_ id: String, ifSame expected: SshConnection? = nil) async {
+    if let expected, connections[id] !== expected { return }
     guard let connection = connections.removeValue(forKey: id) else { return }
     await connection.close()
   }

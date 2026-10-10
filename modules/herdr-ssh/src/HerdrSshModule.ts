@@ -17,6 +17,8 @@ declare class HerdrSshModule extends NativeModule<HerdrSshEvents> {
   connect(id: string, config: NativeSshConfig): Promise<ConnectResult>;
   /** Close and forget the connection, and every stream running on it. */
   disconnect(id: string): Promise<void>;
+  /** Cancel only the displayed attempt, never a newer connection. */
+  cancelAuth(id: string, attemptId: string): Promise<void>;
   /**
    * Run a command to completion and collect its output, giving up after
    * `timeoutMs`. Exceeding it drops the connection as well as failing the call:

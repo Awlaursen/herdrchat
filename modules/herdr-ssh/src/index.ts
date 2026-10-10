@@ -29,6 +29,7 @@ function flatten(config: SshConfig): NativeSshConfig {
     username: config.username,
     hostKeyFingerprint: config.hostKeyFingerprint ?? null,
   };
+  if (config.auth.kind === 'tailscale') return { ...base, authKind: 'tailscale' };
   return config.auth.kind === 'password'
     ? { ...base, authKind: 'password', password: config.auth.password }
     : {

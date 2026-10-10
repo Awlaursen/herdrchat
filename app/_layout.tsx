@@ -12,6 +12,7 @@ import {
   useNotificationRouting,
   usePushTokenRefresh,
 } from '@/features/notifications/useNotificationRouting';
+import { SshApprovalPrompt } from '@/features/servers/SshApprovalPrompt';
 import { AppTheme } from '@/theme/AppTheme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { darkPalette, lightPalette } from '@/theme/tokens';
@@ -40,6 +41,7 @@ export default function RootLayout() {
               <AppTheme>
                 <StatusBar style="auto" />
                 <RootStack />
+                <SshApprovalPrompt />
               </AppTheme>
             </Hydrate>
           </SQLiteProvider>

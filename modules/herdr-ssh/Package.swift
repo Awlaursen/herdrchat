@@ -10,7 +10,7 @@ let package = Package(
     name: "NativeChecks",
     dependencies: [.product(name: "Citadel", package: "Citadel")],
     path: ".",
-    exclude: ["android", "src", "README.md", "expo-module.config.json", "ios/HerdrSshModule.swift", "ios/HerdrSsh.podspec"],
-    sources: ["ios/SshConnection.swift", "ios/HostKeyPin.swift", "tests/NativeChecks.swift"]
+    exclude: ["android", "src", "README.md", "expo-module.config.json", "ios/HerdrSshModule.swift", "ios/HerdrSsh.podspec", "tests/tailscale_fixture.py"],
+    sources: ["ios/SshConnection.swift", "ios/HostKeyPin.swift", "ios/TailscaleSession.swift", "tests/NativeChecks.swift", "tests/TailscaleChecks.swift"]
   )]
 )

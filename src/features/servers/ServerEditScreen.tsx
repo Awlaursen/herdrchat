@@ -287,7 +287,7 @@ export default function ServerEditScreen() {
 
   const save = async () => {
     const connection = draft();
-    if (secret.length > 0) await saveSecret(connection.id, secret);
+    if (authKind !== 'tailscale' && secret.length > 0) await saveSecret(connection.id, secret);
     // The pin survives a cosmetic edit (name, herdr path, session). Only a
     // changed endpoint replaces it, and then with the key the passing test
     // actually saw, never a blank slate the next connect fills in blindly.
@@ -413,6 +413,7 @@ export default function ServerEditScreen() {
             options={[
               { value: 'password', label: 'Password' },
               { value: 'privateKey', label: 'Private key' },
+              ...(Platform.OS === 'ios' ? [{ value: 'tailscale' as const, label: 'Tailscale SSH' }] : []),
             ]}
             value={authKind}
             onChange={(kind) => {
@@ -420,7 +421,12 @@ export default function ServerEditScreen() {
               invalidate(setAuthKind)(kind);
             }}
           />
-          {authKind === 'privateKey' ? (
+          {authKind === 'tailscale' ? (
+            <Text variant="footnote" color="secondary">
+              Connect this phone to Tailscale. Your tailnet authorizes SSH access;
+              if check mode is required, approve the sign-in in your browser.
+            </Text>
+          ) : authKind === 'privateKey' ? (
             <KeyField value={secret} onChangeText={invalidate(setSecret)} />
           ) : (
             <Field
@@ -433,7 +439,7 @@ export default function ServerEditScreen() {
             />
           )}
           <Text variant="caption" color="secondary">
-            {isNew
+            {authKind === 'tailscale' ? 'No SSH password or private key is needed.' : isNew
               ? 'Stored in the device keychain, never in the database.'
               : 'Leave empty to keep the current secret.'}
           </Text>

@@ -85,3 +85,35 @@ it('does not start a stream that was already cancelled', async () => {
   await expect(streamLines('host', 'tail', 1000, controller.signal).next()).resolves.toMatchObject({ done: true });
   expect(native.startStream).not.toHaveBeenCalled();
 });
+
+it('connects using Tailscale without flattening it into an empty private key', async () => {
+  const { connect } = await import('..');
+  await connect('tail', { ...config, auth: { kind: 'tailscale' } });
+  expect(native.connect).toHaveBeenCalledWith('tail', {
+    host: config.host, port: config.port, username: config.username,
+    hostKeyFingerprint: null, authKind: 'tailscale',
+  });
+});
+
+it('checks native liveness again before a later command begins its short deadline', async () => {
+  const transport = new SshHerdrTransport('tail', async () => ({ ...config, auth: { kind: 'tailscale' } }));
+  await transport.exec('first', 1000);
+  let approve!: () => void;
+  native.connect.mockImplementationOnce(() => new Promise(resolve => {
+    approve = () => resolve({ ok: true, fingerprint: 'pin-A' });
+  }));
+  const later = transport.exec('second', 1000);
+  await flush();
+  expect(native.connect).toHaveBeenCalledTimes(2);
+  expect(native.exec).toHaveBeenCalledTimes(1);
+  approve();
+  await expect(later).resolves.toMatchObject({ ok: true });
+  expect(native.exec).toHaveBeenCalledTimes(2);
+});
+
+it('never executes a command after approval was cancelled or expired', async () => {
+  native.connect.mockResolvedValue({ ok: false, code: 'auth_cancelled', message: 'Cancelled' });
+  const transport = new SshHerdrTransport('tail', async () => ({ ...config, auth: { kind: 'tailscale' } }));
+  await expect(transport.exec('write', 1000)).resolves.toMatchObject({ code: 'auth_cancelled' });
+  expect(native.exec).not.toHaveBeenCalled();
+});

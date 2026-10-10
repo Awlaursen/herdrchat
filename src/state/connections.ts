@@ -19,7 +19,7 @@ export interface ServerConnection {
   host: string;
   port: number;
   username: string;
-  authKind: 'privateKey' | 'password';
+  authKind: 'privateKey' | 'password' | 'tailscale';
   /** Path to the herdr binary if it isn't on the non-interactive PATH. */
   herdrPath: string;
   /**
@@ -259,14 +259,14 @@ export function clientFor(connection: ServerConnection): HerdrClient {
         loadSecret(connection.id),
         loadHostKeyPin(connection.id),
       ]);
-      if (secret === null || secret.length === 0) {
+      if (connection.authKind !== 'tailscale' && (secret === null || secret.length === 0)) {
         throw new MissingCredentialsError(
           connection.authKind === 'password'
             ? `The password for ${connection.name || connection.host} isn't on this device. Restoring a backup brings back hosts but not their passwords. Enter it again.`
             : `The private key for ${connection.name || connection.host} isn't on this device. Restoring a backup brings back hosts but not their keys. Add it again.`
         );
       }
-      return sshConfig(connection, secret, pin);
+      return sshConfig(connection, secret ?? '', pin);
     },
     (fingerprint) => {
       // First contact: remember what we trusted, so a later key change is
@@ -306,7 +306,9 @@ export function sshConfig(
     port: connection.port,
     username: connection.username,
     auth:
-      connection.authKind === 'password'
+      connection.authKind === 'tailscale'
+        ? { kind: 'tailscale' }
+        : connection.authKind === 'password'
         ? { kind: 'password', password: secret }
         : { kind: 'privateKey', pem: secret, passphrase: null },
     hostKeyFingerprint,
@@ -342,7 +344,7 @@ export function testClient(
     id,
     async () => {
       const pin = enforceStoredPin ? await loadHostKeyPin(connection.id) : null;
-      return sshConfig(connection, secret, pin);
+      return sshConfig(connection, secret ?? '', pin);
     },
     onFingerprint
   );

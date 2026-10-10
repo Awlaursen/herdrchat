@@ -70,5 +70,5 @@ export function shouldPoll({
  * or edits the host, which replaces the client and so restarts the loop.
  */
 export function needsTheUser(code: string | null | undefined): boolean {
-  return code === 'auth_failed' || code === 'host_key_changed' || code === 'credentials_missing' || code === 'bad_key';
+  return code === 'auth_cancelled' || code === 'auth_timeout' || code === 'auth_failed' || code === 'host_key_changed' || code === 'credentials_missing' || code === 'bad_key';
 }

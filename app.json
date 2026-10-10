@@ -71,7 +71,8 @@
           "microphonePermission": false
         }
       ],
-      "./plugins/withReleaseSigning"
+      "./plugins/withReleaseSigning",
+      "expo-web-browser"
     ]
   }
 }
