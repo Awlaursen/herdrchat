@@ -1,5 +1,5 @@
 import Native from '../HerdrSshModule';
-import { streamLines, type SshConfig } from '..';
+import { connect, streamLines, type SshConfig } from '..';
 import { DONE_MARK } from '../../../../src/lib/herdr/doneMark';
 import { SshHerdrTransport } from '../../../../src/lib/herdr/sshTransport';
 
@@ -84,4 +84,72 @@ it('does not start a stream that was already cancelled', async () => {
   controller.abort();
   await expect(streamLines('host', 'tail', 1000, controller.signal).next()).resolves.toMatchObject({ done: true });
   expect(native.startStream).not.toHaveBeenCalled();
+});
+
+it('connects using Tailscale without flattening it into an empty private key', async () => {
+  await connect('tail', { ...config, auth: { kind: 'tailscale' } });
+  expect(native.connect).toHaveBeenCalledWith('tail', {
+    host: config.host, port: config.port, username: config.username,
+    hostKeyFingerprint: null, authKind: 'tailscale',
+  });
+});
+
+it('checks native liveness again before a later command begins its short deadline', async () => {
+  const transport = new SshHerdrTransport('tail', async () => ({ ...config, auth: { kind: 'tailscale' } }));
+  await transport.exec('first', 1000);
+  let approve!: () => void;
+  native.connect.mockImplementationOnce(() => new Promise(resolve => {
+    approve = () => resolve({ ok: true, fingerprint: 'pin-A' });
+  }));
+  const later = transport.exec('second', 1000);
+  await flush();
+  expect(native.connect).toHaveBeenCalledTimes(2);
+  expect(native.exec).toHaveBeenCalledTimes(1);
+  approve();
+  await expect(later).resolves.toMatchObject({ ok: true });
+  expect(native.exec).toHaveBeenCalledTimes(2);
+});
+
+it('never executes a command after approval was cancelled or expired', async () => {
+  native.connect.mockResolvedValue({ ok: false, code: 'auth_cancelled', message: 'Cancelled' });
+  const transport = new SshHerdrTransport('tail', async () => ({ ...config, auth: { kind: 'tailscale' } }));
+  await expect(transport.exec('write', 1000)).resolves.toMatchObject({ code: 'auth_cancelled' });
+  expect(native.exec).not.toHaveBeenCalled();
+});
+
+it('does not reconnect or execute after a disposed test finishes loading its config', async () => {
+  let loaded!: (config: SshConfig) => void;
+  const transport = new SshHerdrTransport('test', () => new Promise(resolve => { loaded = resolve; }));
+  const command = transport.exec('write', 1000);
+  await transport.close();
+  loaded(config);
+  await expect(command).resolves.toMatchObject({ ok: false, code: 'auth_cancelled' });
+  expect(native.connect).not.toHaveBeenCalled();
+  expect(native.exec).not.toHaveBeenCalled();
+});
+
+it('does not execute after an old approval completes following close', async () => {
+  let approve!: () => void;
+  native.connect.mockImplementation(() => new Promise(resolve => {
+    approve = () => resolve({ ok: true, fingerprint: 'pin-A' });
+  }));
+  const transport = new SshHerdrTransport('test', async () => config);
+  const command = transport.exec('write', 1000);
+  await flush();
+  await transport.close();
+  approve();
+  await expect(command).resolves.toMatchObject({ ok: false, code: 'auth_cancelled' });
+  expect(native.exec).not.toHaveBeenCalled();
+});
+
+it('reuses loaded credentials and the persisted pin while checking native liveness', async () => {
+  const load = jest.fn(async () => config);
+  const save = jest.fn(async () => undefined);
+  const transport = new SshHerdrTransport('host', load, save);
+  await transport.exec('first', 1000);
+  await transport.exec('second', 1000);
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(native.connect).toHaveBeenCalledTimes(2);
+  expect(native.connect).toHaveBeenLastCalledWith('host', expect.objectContaining({ hostKeyFingerprint: 'pin-A' }));
 });

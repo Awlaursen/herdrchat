@@ -79,3 +79,12 @@ describe('pinned and muted chats', () => {
     expect(loaded.get('w1')).toEqual({ sessionSig: 's1', pinnedAt: 5, muted: false });
   });
 });
+
+it('restores Tailscale authentication without changing existing auth kinds', async () => {
+  const { loadConnections } = jest.requireActual<typeof import('../db')>('../db');
+  const db = { getAllAsync: async () => ['tailscale', 'password', 'privateKey'].map((auth_kind) => ({
+    id: auth_kind, name: 'host', host: 'host', port: 22, username: 'me', auth_kind,
+    herdr_path: 'herdr', session_name: '',
+  })) } as unknown as SQLiteDatabase;
+  expect((await loadConnections(db)).map(row => row.authKind)).toEqual(['tailscale', 'password', 'privateKey']);
+});

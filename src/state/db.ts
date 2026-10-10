@@ -168,7 +168,7 @@ export async function loadConnections(db: SQLite.SQLiteDatabase): Promise<Server
     host: row.host,
     port: row.port,
     username: row.username,
-    authKind: row.auth_kind === 'password' ? 'password' : 'privateKey',
+    authKind: row.auth_kind === 'tailscale' ? 'tailscale' : row.auth_kind === 'password' ? 'password' : 'privateKey',
     herdrPath: row.herdr_path,
     // Null on a row written before the column existed.
     sessionName: row.session_name ?? '',

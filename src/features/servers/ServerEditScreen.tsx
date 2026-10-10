@@ -87,6 +87,11 @@ export default function ServerEditScreen() {
   const form = useRef<ScrollView>(null);
   const fieldOffsets = useRef({ address: 0, credentials: 0, path: 0 });
   const testAttempt = useRef(0);
+  const activeTest = useRef<(() => Promise<void>) | null>(null);
+  useEffect(() => () => {
+    testAttempt.current += 1;
+    void activeTest.current?.();
+  }, []);
   useEffect(() => {
     let alive = true;
     void loadHostKeyPin(params.id).then((pin) => {
@@ -113,6 +118,8 @@ export default function ServerEditScreen() {
     <T,>(setter: (value: T) => void) =>
     (value: T) => {
       testAttempt.current += 1;
+      void activeTest.current?.();
+      activeTest.current = null;
       setter(value);
       setTest({ kind: 'idle' });
     };
@@ -129,6 +136,7 @@ export default function ServerEditScreen() {
   });
 
   const resolveSecret = async (): Promise<string> => {
+    if (authKind === 'tailscale') return '';
     if (secret.length > 0) return secret;
     // Editing with the field left blank keeps the stored secret.
     return (await loadSecret(params.id)) ?? '';
@@ -139,9 +147,12 @@ export default function ServerEditScreen() {
     setTest({ kind: 'testing' });
     setObservedFingerprint(null);
     const connection = draft();
+    await activeTest.current?.();
+    const credentials = authKind === 'tailscale' ? '' : await resolveSecret();
+    if (attempt !== testAttempt.current) return;
     const { client, dispose } = testClient(
       connection,
-      await resolveSecret(),
+      credentials,
       connection.herdrPath,
       {
         // An unchanged endpoint keeps its identity: the test must refuse any key
@@ -150,6 +161,7 @@ export default function ServerEditScreen() {
         onFingerprint: setObservedFingerprint,
       }
     );
+    activeTest.current = dispose;
     try {
       await client.ping();
       const snapshot = await client.snapshot();
@@ -168,6 +180,7 @@ export default function ServerEditScreen() {
       }
     } finally {
       await dispose();
+      if (activeTest.current === dispose) activeTest.current = null;
     }
   };
 
@@ -287,7 +300,7 @@ export default function ServerEditScreen() {
 
   const save = async () => {
     const connection = draft();
-    if (secret.length > 0) await saveSecret(connection.id, secret);
+    if (authKind !== 'tailscale' && secret.length > 0) await saveSecret(connection.id, secret);
     // The pin survives a cosmetic edit (name, herdr path, session). Only a
     // changed endpoint replaces it, and then with the key the passing test
     // actually saw, never a blank slate the next connect fills in blindly.
@@ -413,6 +426,7 @@ export default function ServerEditScreen() {
             options={[
               { value: 'password', label: 'Password' },
               { value: 'privateKey', label: 'Private key' },
+              ...(Platform.OS === 'ios' ? [{ value: 'tailscale' as const, label: 'Tailscale SSH' }] : []),
             ]}
             value={authKind}
             onChange={(kind) => {
@@ -420,7 +434,12 @@ export default function ServerEditScreen() {
               invalidate(setAuthKind)(kind);
             }}
           />
-          {authKind === 'privateKey' ? (
+          {authKind === 'tailscale' ? (
+            <Text variant="footnote" color="secondary">
+              Connect this phone to Tailscale. Your tailnet authorizes SSH access;
+              if check mode is required, approve the sign-in in your browser.
+            </Text>
+          ) : authKind === 'privateKey' ? (
             <KeyField value={secret} onChangeText={invalidate(setSecret)} />
           ) : (
             <Field
@@ -433,7 +452,7 @@ export default function ServerEditScreen() {
             />
           )}
           <Text variant="caption" color="secondary">
-            {isNew
+            {authKind === 'tailscale' ? 'No SSH password or private key is needed.' : isNew
               ? 'Stored in the device keychain, never in the database.'
               : 'Leave empty to keep the current secret.'}
           </Text>

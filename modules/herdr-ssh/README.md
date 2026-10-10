@@ -86,6 +86,27 @@ starts and stops its own sshd. The directory must contain `config` (bound to
 `host_b` key, and the test client's public key in AuthorizedKeysFile. Use only
 disposable keys and a writable directory below `/tmp`; no real host is needed.
 
+## Tailscale SSH approval on iOS
+
+`auth: { kind: 'tailscale' }` uses NIOSSH's `none` authentication. The encrypted
+SSH connection carries the tailnet identity; this is not anonymous access to an
+ordinary SSH server. `TailscaleSession.swift` owns this pipeline because Citadel
+0.12.1 does not expose banners and fixes login at ten seconds. It uses the same
+NIOSSH dependency, validates the same host-key pin, and opens only exec channels.
+Password/key authentication continues through Citadel.
+
+`onAuth` carries `started`, `banner`, and `finished` events, tagged with both
+connection and attempt IDs. `cancelAuth` only cancels the matching pending
+attempt. The TCP timeout is 15 seconds, initial SSH handshake 30 seconds, and
+the first banner starts a bounded 300-second approval window. Repeated banners
+do not extend it. Command deadlines start after approval; auth failures never
+replay commands. URLs are transient and interpreted by TypeScript, not native.
+
+The `SSH native checks` workflow compiles production Swift on macOS and runs a
+loopback-only Paramiko fixture. It covers a twelve-second approval delay,
+banners, denial, timeout, cancellation, changed keys, stdout/stderr, nonzero
+exit and refused commands. This does not replace a real iPhone/Tailscale check.
+
 ## Host key fingerprints
 
 Both platforms report OpenSSH's form: unpadded base64 of SHA-256 over the SSH

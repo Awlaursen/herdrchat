@@ -18,6 +18,7 @@ export interface SshConfig {
 }
 
 export type SshAuth =
+  | { kind: 'tailscale' }
   | { kind: 'password'; password: string }
   /** OpenSSH-format private key (ed25519 or RSA), e.g. `~/.ssh/id_ed25519`. */
   | { kind: 'privateKey'; pem: string; passphrase?: string | null };
@@ -34,6 +35,7 @@ export type NativeSshConfig = {
   username: string;
   hostKeyFingerprint: string | null;
 } & (
+  | { authKind: 'tailscale' }
   | { authKind: 'password'; password: string }
   | { authKind: 'privateKey'; privateKey: string; passphrase: string | null }
 );
@@ -45,6 +47,8 @@ export type NativeSshConfig = {
  * be tested.
  */
 export type SshFailureCode =
+  | 'auth_cancelled'
+  | 'auth_timeout'
   /** The presented host key differs from the stored pin. Possible MITM. */
   | 'host_key_changed'
   /** TCP/handshake failure: host down, wrong address, not on the tailnet. */
@@ -134,7 +138,17 @@ export interface StreamErrorEvent {
  * to `EventsMap`, which carries an index signature, and an interface has no
  * implicit one.
  */
+export interface AuthEvent {
+  connectionId: string;
+  attemptId: string;
+  host: string;
+  username: string;
+  phase: 'started' | 'banner' | 'finished';
+  message?: string;
+}
+
 export type HerdrSshEvents = {
+  onAuth: (event: AuthEvent) => void;
   onStreamLine: (event: StreamLineEvent) => void;
   onStreamEnd: (event: StreamEndEvent) => void;
   onStreamError: (event: StreamErrorEvent) => void;

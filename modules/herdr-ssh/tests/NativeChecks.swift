@@ -14,6 +14,7 @@ struct SshConfigRecord {
 
 @main struct NativeChecks {
   static func main() async throws {
+    setbuf(stdout, nil)
     let pin = HostKeyPin(nil)
     precondition(pin.accept("A") && pin.accept("A") && !pin.accept("B"))
     precondition(pin.fingerprint == "A")
@@ -22,6 +23,10 @@ struct SshConfigRecord {
     DispatchQueue.concurrentPerform(iterations: 100) { i in _ = concurrent.accept("key-\(i)") }
     precondition(concurrent.fingerprint != nil && !concurrent.accept("foreign"))
     print("PASS first contact, changed key, concurrent pin checks")
+
+    if let port = ProcessInfo.processInfo.environment["TAILSCALE_TEST_PORT"].flatMap(Int.init) {
+      try await runTailscaleChecks(port: port)
+    }
 
     guard CommandLine.arguments.count == 3 else {
       print("For loopback checks: swift run NativeChecks <test-key> <test-directory>")

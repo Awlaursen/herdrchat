@@ -88,6 +88,29 @@ Windows-native paths are not translated.
    lookup: the app will explain the missing integration instead of guessing
    which conversation belongs to you.
 
+### Tailscale SSH with check mode (iOS)
+
+For a host running **Tailscale SSH** (`tailscale set --ssh`), select **Tailscale
+SSH** under Authentication. Connect the phone's Tailscale app to the same
+accessible tailnet and enter the host's SSH username. No SSH password or private
+key is needed; the tailnet's SSH policy decides access. Ordinary OpenSSH reached
+over Tailscale still uses the Password or Private key option.
+
+When check mode requires reauthentication, the app displays the server's SSH
+banner. Tap **Approve in browser**, complete the Tailscale sign-in, and return
+to the app. Approval opens in an in-app browser; closing it does not authenticate
+you. The SSH server must confirm success before any command runs. The app waits
+up to five minutes after the first banner, with **Cancel sign-in** available.
+Expired or cancelled approval requires a deliberate retry.
+
+Only HTTPS approval links on `login.tailscale.com/a/…` get a browser button.
+Other SSH banners remain visible as text. Host-key pinning applies exactly as
+with other login methods. Check mode does not require changing your policy to
+`accept`, and neither approval links nor Tailscale tokens are saved by the app.
+
+This login method is iOS-only for now. In any Demo conversation, type
+`show ssh approval` to preview its UI without connecting or opening a real link.
+
 ## Build the iOS app
 
 On a Mac with Node.js 22+ and Xcode installed, clone this repository and run:

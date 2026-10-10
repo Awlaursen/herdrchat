@@ -1,0 +1,35 @@
+name: SSH native checks
+on:
+  push:
+    branches: [main]
+    paths: ['modules/herdr-ssh/**', '.github/workflows/ssh-native.yml']
+  pull_request:
+    paths: ['modules/herdr-ssh/**', '.github/workflows/ssh-native.yml']
+permissions:
+  contents: read
+concurrency:
+  group: ssh-native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: modules/herdr-ssh/.build
+          key: ssh-${{ runner.os }}-${{ hashFiles('modules/herdr-ssh/Package.resolved') }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install paramiko==3.5.1
+      - name: Build production SSH code
+        run: swift build --package-path modules/herdr-ssh
+      - name: Test check-mode lifecycle (bounded)
+        run: python3 modules/herdr-ssh/tests/run_native_checks.py
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: modules/herdr-ssh/.build
+          key: ssh-${{ runner.os }}-${{ hashFiles('modules/herdr-ssh/Package.resolved') }}

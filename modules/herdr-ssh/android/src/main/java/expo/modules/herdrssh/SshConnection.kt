@@ -118,6 +118,9 @@ class SshConnection(private val config: SshConfigRecord) {
   }
 
   private fun authenticate(client: SSHClient) {
+    if (config.authKind == "tailscale") {
+      throw SshFailure("auth_failed", "Tailscale SSH approval is currently supported on iOS. Choose password or private key for Android.")
+    }
     try {
       if (config.authKind == "password") {
         client.authPassword(config.username, config.password ?: "")

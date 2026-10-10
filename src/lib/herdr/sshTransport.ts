@@ -26,6 +26,9 @@ import { withJsDeadline } from './timeouts';
 export class SshHerdrTransport implements HerdrTransport {
   /** Resolves once the first connect finishes, so callers never race it. */
   private opening: Promise<ConnectResult> | null = null;
+  private generation = 0;
+  private config: SshConfig | null = null;
+  private savedFingerprint: string | null = null;
 
   constructor(
     private readonly id: string,
@@ -46,10 +49,17 @@ export class SshHerdrTransport implements HerdrTransport {
    * produce one handshake rather than ten.
    */
   async open(): Promise<ConnectResult> {
+    const generation = this.generation;
+    const cancelled = (): ConnectResult => ({ ok: false, code: 'auth_cancelled', message: 'The SSH connection was cancelled.' });
     if (this.opening === null) {
-      this.opening = this.loadConfig()
-        .then((config) => connect(this.id, config))
+      this.opening = (this.config === null ? this.loadConfig() : Promise.resolve(this.config))
+        .then((config) => {
+          if (generation !== this.generation) return cancelled();
+          this.config = config;
+          return connect(this.id, config);
+        })
         .then(async (result): Promise<ConnectResult> => {
+          if (generation !== this.generation) return cancelled();
           if (result.ok) {
             // A connection we cannot name is a connection we cannot pin. Storing
             // an empty fingerprint would read back as "no pin" — trust-on-first-
@@ -69,15 +79,22 @@ export class SshHerdrTransport implements HerdrTransport {
                 message: "The host connected but reported no key fingerprint, so its identity can't be checked.",
               };
             }
-            await this.onFingerprint?.(result.fingerprint);
+            if (this.savedFingerprint !== result.fingerprint) {
+              await this.onFingerprint?.(result.fingerprint);
+              if (generation !== this.generation) return cancelled();
+              this.savedFingerprint = result.fingerprint;
+            }
+            // Retain the accepted pin even if native later drops the session.
+            if (this.config) this.config = { ...this.config, hostKeyFingerprint: result.fingerprint };
           } else {
             // Let the next call retry rather than caching a failure forever —
             // the usual reason is that the phone wasn't on the tailnet yet.
             this.opening = null;
           }
-          return result;
+          return generation === this.generation ? result : cancelled();
         })
         .catch(async (thrown: unknown): Promise<ConnectResult> => {
+          if (generation !== this.generation) return cancelled();
           // Everything before the handshake can throw — reading the config, a
           // keychain that will not answer. Without this the REJECTED promise
           // stays in `opening` and every later command on this host rejects
@@ -86,6 +103,7 @@ export class SshHerdrTransport implements HerdrTransport {
           // In particular, a failed pin write must not leave an authenticated
           // native connection usable by the next caller.
           await disconnect(this.id).catch(() => undefined);
+          this.config = null;
           this.opening = null;
           return {
             ok: false,
@@ -94,7 +112,12 @@ export class SshHerdrTransport implements HerdrTransport {
           };
         });
     }
-    return this.opening;
+    const opening = this.opening;
+    try {
+      return await opening;
+    } finally {
+      if (this.opening === opening) this.opening = null;
+    }
   }
 
   /**
@@ -142,6 +165,9 @@ export class SshHerdrTransport implements HerdrTransport {
   }
 
   async close(): Promise<void> {
+    this.generation += 1;
+    this.config = null;
+    this.savedFingerprint = null;
     this.opening = null;
     await disconnect(this.id);
   }

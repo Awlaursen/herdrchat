@@ -19,7 +19,7 @@ export interface ServerConnection {
   host: string;
   port: number;
   username: string;
-  authKind: 'privateKey' | 'password';
+  authKind: 'privateKey' | 'password' | 'tailscale';
   /** Path to the herdr binary if it isn't on the non-interactive PATH. */
   herdrPath: string;
   /**
@@ -256,17 +256,17 @@ export function clientFor(connection: ServerConnection): HerdrClient {
     connection.id,
     async () => {
       const [secret, pin] = await Promise.all([
-        loadSecret(connection.id),
+        connection.authKind === 'tailscale' ? Promise.resolve(null) : loadSecret(connection.id),
         loadHostKeyPin(connection.id),
       ]);
-      if (secret === null || secret.length === 0) {
+      if (connection.authKind !== 'tailscale' && (secret === null || secret.length === 0)) {
         throw new MissingCredentialsError(
           connection.authKind === 'password'
             ? `The password for ${connection.name || connection.host} isn't on this device. Restoring a backup brings back hosts but not their passwords. Enter it again.`
             : `The private key for ${connection.name || connection.host} isn't on this device. Restoring a backup brings back hosts but not their keys. Add it again.`
         );
       }
-      return sshConfig(connection, secret, pin);
+      return sshConfig(connection, secret ?? '', pin);
     },
     (fingerprint) => {
       // First contact: remember what we trusted, so a later key change is
@@ -306,7 +306,9 @@ export function sshConfig(
     port: connection.port,
     username: connection.username,
     auth:
-      connection.authKind === 'password'
+      connection.authKind === 'tailscale'
+        ? { kind: 'tailscale' }
+        : connection.authKind === 'password'
         ? { kind: 'password', password: secret }
         : { kind: 'privateKey', pem: secret, passphrase: null },
     hostKeyFingerprint,
@@ -318,6 +320,8 @@ export function sshConfig(
  * form values. Uses its own id so a failed test can't poison the saved host's
  * live connection.
  */
+let nextTestConnection = 0;
+
 export function testClient(
   connection: ServerConnection,
   secret: string,
@@ -337,12 +341,12 @@ export function testClient(
     onFingerprint?: (fingerprint: string) => void;
   } = {}
 ): { client: HerdrClient; dispose: () => Promise<void> } {
-  const id = `test-${connection.id}`;
+  const id = `test-${connection.id}-${++nextTestConnection}`;
   const transport = new SshHerdrTransport(
     id,
     async () => {
       const pin = enforceStoredPin ? await loadHostKeyPin(connection.id) : null;
-      return sshConfig(connection, secret, pin);
+      return sshConfig(connection, secret ?? '', pin);
     },
     onFingerprint
   );

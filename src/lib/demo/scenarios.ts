@@ -12,6 +12,7 @@
 
 /** Typed into any demo chat, these start a scenario. */
 export const DEMO_PHRASES = {
+  sshApproval: 'show ssh approval',
   questions: 'ask me two questions',
   tools: 'run the checks',
   trust: 'open a new folder',

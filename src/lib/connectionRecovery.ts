@@ -7,6 +7,9 @@ export function connectionRecovery(code: string): {
   action: RecoveryAction;
 } {
   switch (code) {
+    case 'auth_cancelled':
+    case 'auth_timeout':
+      return { title: 'SSH approval did not complete', label: 'Try again', action: 'retry' };
     case 'auth_failed':
       return {
         title: 'Authentication was rejected',
