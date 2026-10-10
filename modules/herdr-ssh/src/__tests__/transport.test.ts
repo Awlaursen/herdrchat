@@ -141,3 +141,15 @@ it('does not execute after an old approval completes following close', async () 
   await expect(command).resolves.toMatchObject({ ok: false, code: 'auth_cancelled' });
   expect(native.exec).not.toHaveBeenCalled();
 });
+
+it('reuses loaded credentials and the persisted pin while checking native liveness', async () => {
+  const load = jest.fn(async () => config);
+  const save = jest.fn(async () => undefined);
+  const transport = new SshHerdrTransport('host', load, save);
+  await transport.exec('first', 1000);
+  await transport.exec('second', 1000);
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(native.connect).toHaveBeenCalledTimes(2);
+  expect(native.connect).toHaveBeenLastCalledWith('host', expect.objectContaining({ hostKeyFingerprint: 'pin-A' }));
+});
