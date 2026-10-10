@@ -14,6 +14,7 @@ struct SshConfigRecord {
 
 @main struct NativeChecks {
   static func main() async throws {
+    setbuf(stdout, nil)
     let pin = HostKeyPin(nil)
     precondition(pin.accept("A") && pin.accept("A") && !pin.accept("B"))
     precondition(pin.fingerprint == "A")

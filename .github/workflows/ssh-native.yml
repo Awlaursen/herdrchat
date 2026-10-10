@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: modules/herdr-ssh/.build
           key: ssh-${{ runner.os }}-${{ hashFiles('modules/herdr-ssh/Package.resolved') }}
@@ -23,9 +23,16 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 -m pip install paramiko==3.5.1
-      - name: Build production SSH code and test check-mode lifecycle
+      - name: Build production SSH code
+        run: swift build --package-path modules/herdr-ssh
+      - name: Test check-mode lifecycle (bounded)
         run: |
           python3 modules/herdr-ssh/tests/tailscale_fixture.py 22265 > /tmp/ssh-fixture.log 2>&1 &
           fixture_pid=$!
           trap 'kill "$fixture_pid"' EXIT
-          TAILSCALE_TEST_PORT=22265 swift run --package-path modules/herdr-ssh NativeChecks
+          TAILSCALE_TEST_PORT=22265 python3 -c 'import subprocess; subprocess.run(["modules/herdr-ssh/.build/debug/NativeChecks"], check=True, timeout=90)'
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: modules/herdr-ssh/.build
+          key: ssh-${{ runner.os }}-${{ hashFiles('modules/herdr-ssh/Package.resolved') }}

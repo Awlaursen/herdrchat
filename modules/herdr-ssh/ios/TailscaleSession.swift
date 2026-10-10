@@ -91,6 +91,9 @@ final class TailscaleSession: @unchecked Sendable {
         return TailscaleSession(channel: channel, group: group)
       } onCancel: { control.cancel() }
     } catch {
+      // DNS/TCP can fail before the auth handler is installed. Complete its
+      // promise too, so even that path leaves no unresolved NIO promise.
+      authenticated.fail(error)
       control.cancel()
       try? await group.shutdownGracefully()
       if Task.isCancelled {
@@ -242,7 +245,10 @@ private final class TailscaleAuthHandler: ChannelInboundHandler, @unchecked Send
     context.fireChannelInactive()
   }
 
-  func handlerRemoved(context: ChannelHandlerContext) { deadline?.cancel() }
+  func handlerRemoved(context: ChannelHandlerContext) {
+    fail(SshFailure(code: "connect_failed", message: "The SSH connection closed before login completed."))
+    deadline?.cancel()
+  }
 }
 
 private final class TailscaleCommandHandler: ChannelInboundHandler {
