@@ -1,0 +1,25 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "personal-ios": {
+      "developmentClient": false,
+      "distribution": "internal",
+      "autoIncrement": true,
+      "ios": {
+        "buildConfiguration": "Release",
+        "simulator": false
+      }
+    },
+    "personal-testflight": {
+      "developmentClient": false,
+      "distribution": "store",
+      "autoIncrement": true,
+      "ios": {
+        "buildConfiguration": "Release"
+      }
+    }
+  }
+}

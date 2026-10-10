@@ -1,8 +1,8 @@
 {
   "expo": {
     "name": "HerdrChat",
-    "slug": "herdrchat",
-    "scheme": "herdrchat",
+    "slug": "herdrchat-personal",
+    "scheme": "herdrchat-personal",
     "version": "0.11.2",
     "primaryColor": "#5459D4",
     "orientation": "portrait",
@@ -17,13 +17,14 @@
       "reactCompiler": true
     },
     "ios": {
-      "bundleIdentifier": "dev.herdr.HerdrChat",
-      "buildNumber": "84",
+      "bundleIdentifier": "dev.awlaursen.herdrchat",
+      "buildNumber": "1",
       "supportsTablet": true,
       "requireFullScreen": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSLocalNetworkUsageDescription": "Local network access is needed to reach herdr servers over Tailscale."
+        "NSLocalNetworkUsageDescription": "Local network access is needed to reach herdr servers over Tailscale.",
+        "CFBundleDisplayName": "HerdrChat Personal"
       },
       "entitlements": {
         "aps-environment": "production"
