@@ -1,0 +1,28 @@
+appId: dev.herdr.HerdrChat
+---
+- runFlow: _start.yaml
+- tapOn:
+    id: chat-row-w2
+- tapOn:
+    id: composer-input
+- inputText: show ssh approval
+- runFlow: _send.yaml
+- extendedWaitUntil:
+    visible: Approve Tailscale SSH
+    timeout: 10000
+- assertVisible: demo@demo.tailnet.ts.net
+- takeScreenshot: ssh-approval-${APPEARANCE}
+- tapOn:
+    id: ssh-auth-cancel
+- assertNotVisible: Approve Tailscale SSH
+- tapOn:
+    id: composer-input
+- inputText: show ssh approval
+- runFlow: _send.yaml
+- extendedWaitUntil:
+    visible: Approve Tailscale SSH
+    timeout: 10000
+# Demo approval stays local; it never opens a browser or connects to a host.
+- tapOn:
+    id: ssh-auth-open
+- assertNotVisible: Approve Tailscale SSH

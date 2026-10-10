@@ -1,3 +1,4 @@
+import { showDemoSshApproval } from './sshApproval';
 /**
  * A herdr host that isn't one.
  *
@@ -488,6 +489,7 @@ export class DemoHost implements HerdrTransport {
       if (text.trim().startsWith('/') && !this.isOmp(paneId)) return this.command(paneId, text);
       this.append(paneId, this.isOmp(paneId) ? ompLine('user', text, this.uuid(), this.stamp()) : userLine(text, this.uuid(), this.stamp()));
       const asked = text.toLowerCase();
+      if (asked.includes(DEMO_PHRASES.sshApproval)) { showDemoSshApproval(); return silent(); }
       if (asked.includes(DEMO_PHRASES.questions)) return this.askQuestions(paneId);
       if (asked.includes(DEMO_PHRASES.tools)) return this.runChecks(paneId);
       if (asked.includes(DEMO_PHRASES.trust)) return this.askTrust(paneId);

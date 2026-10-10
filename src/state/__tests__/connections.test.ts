@@ -52,3 +52,8 @@ it('adds a new host before the Demo, which stays last', () => {
   useConnections.getState().upsert(host('b'));
   expect(useConnections.getState().connections.map((connection) => connection.id)).toEqual(['a', 'b', DEMO_CONNECTION_ID]);
 });
+
+it('does not turn Tailscale authentication into an empty private key', () => {
+  const { sshConfig } = jest.requireActual<typeof import('../connections')>('../connections');
+  expect(sshConfig({ ...host('tail'), authKind: 'tailscale' }, '', 'pin').auth).toEqual({ kind: 'tailscale' });
+});

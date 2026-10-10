@@ -3,6 +3,7 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Platform, ScrollView, View } from 'react-native';
 
 import Native from '../../../modules/herdr-ssh/src/HerdrSshModule';
+import { subscribeDemoSshApproval, finishDemoSshApproval } from '@/lib/demo/sshApproval';
 import { Button } from '@/components/Button';
 import { Text } from '@/components/Text';
 import { displaySshBanner, reduceSshApprovals, tailscaleApprovalUrl, type SshApprovalEvent } from '@/lib/sshApproval';
@@ -12,6 +13,8 @@ import { radius, screenPadding, spacing } from '@/theme/tokens';
 /** Mounted once above navigation: reconnects, host tests and saved hosts all
  * use the same approval flow. Only the SSH server can declare login complete. */
 export function SshApprovalPrompt() {
+  const [demo, setDemo] = useState<SshApprovalEvent | null>(null);
+  useEffect(() => subscribeDemoSshApproval(setDemo), []);
   const [pending, dispatch] = useReducer(reduceSshApprovals, {});
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
@@ -19,6 +22,7 @@ export function SshApprovalPrompt() {
     return () => listener.remove();
   }, []);
   const approval = Object.values(pending).find((event) => event.phase === 'banner');
+  if (demo) return <ApprovalDialog approval={demo} onApprove={finishDemoSshApproval} onCancel={async () => finishDemoSshApproval()} />;
   if (!approval) return null;
   return <ApprovalDialog key={approval.attemptId} approval={approval} onCancel={async () => {
     await Native.cancelAuth(approval.connectionId, approval.attemptId);
@@ -26,9 +30,10 @@ export function SshApprovalPrompt() {
   }} />;
 }
 
-export function ApprovalDialog({ approval, onCancel }: {
+export function ApprovalDialog({ approval, onCancel, onApprove }: {
   approval: SshApprovalEvent;
   onCancel: () => Promise<void>;
+  onApprove?: () => void;
 }) {
   const { colors } = useTheme();
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +61,7 @@ export function ApprovalDialog({ approval, onCancel }: {
             {displaySshBanner(approval.message ?? '')}
           </Text>
           {url !== null && <Button title="Approve in browser" testID="ssh-auth-open" disabled={cancelling} onPress={() => {
+            if (onApprove) { onApprove(); return; }
             browserOpen.current = true;
             void WebBrowser.openBrowserAsync(url)
               .catch(() => setError('Could not open your browser. Try again.'))

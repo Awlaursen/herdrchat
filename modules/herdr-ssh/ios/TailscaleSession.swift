@@ -1,8 +1,7 @@
 import Foundation
-import Citadel
 import NIOCore
 import NIOPosix
-import NIOSSH
+@preconcurrency import NIOSSH
 
 /// Cancellation must close a socket even while authentication is waiting. NIO
 /// futures alone do not observe Swift task cancellation.
@@ -27,6 +26,8 @@ final class SshDialControl: @unchecked Sendable {
     channel?.close(promise: nil)
   }
 }
+
+enum TailscaleOutput: Sendable { case stdout(ByteBuffer), stderr(ByteBuffer) }
 
 struct TailscaleCommandFailed: Error { let exitCode: Int }
 
@@ -65,7 +66,8 @@ final class TailscaleSession: @unchecked Sendable {
           .connectTimeout(.seconds(15))
           .channelInitializer { channel in
             control.attach(channel)
-            return channel.pipeline.addHandlers(
+            do {
+              try channel.pipeline.syncOperations.addHandlers(
               NIOSSHHandler(
                 role: .client(SSHClientConfiguration(
                   userAuthDelegate: TailscaleNoneAuth(username: username),
@@ -79,7 +81,9 @@ final class TailscaleSession: @unchecked Sendable {
                 }
               ),
               auth
-            )
+              )
+              return channel.eventLoop.makeSucceededVoidFuture()
+            } catch { return channel.eventLoop.makeFailedFuture(error) }
           }
           .connect(host: host, port: port).get()
         try await authenticated.futureResult.get()
@@ -106,11 +110,12 @@ final class TailscaleSession: @unchecked Sendable {
   func readCommand(
     _ command: String,
     onStart: () -> Void,
-    onChunk: (ExecCommandOutput) -> Void
+    onChunk: (TailscaleOutput) -> Void
   ) async throws {
-    let output = AsyncThrowingStream<ExecCommandOutput, Error>.makeStream()
+    let output = AsyncThrowingStream<TailscaleOutput, Error>.makeStream()
     let control = SshDialControl()
     output.continuation.onTermination = { _ in control.cancel() }
+    let continuation = output.continuation
     try await withTaskCancellationHandler {
       let child = try await channel.eventLoop.flatSubmit { [channel] in
         let promise = channel.eventLoop.makePromise(of: Channel.self)
@@ -120,11 +125,15 @@ final class TailscaleSession: @unchecked Sendable {
           control.cancel()
         }
         promise.futureResult.whenComplete { _ in timeout.cancel() }
-        return channel.pipeline.handler(type: NIOSSHHandler.self).flatMap { handler in
+        do {
+          let handler = try channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
           handler.createChannel(promise, channelType: .session) { child, _ in
             control.attach(child)
-            return child.pipeline.addHandler(TailscaleCommandHandler(output: output.continuation))
+            return child.pipeline.addHandler(TailscaleCommandHandler(output: continuation))
           }
+          return promise.futureResult
+        } catch {
+          promise.fail(error)
           return promise.futureResult
         }
       }.get()
@@ -238,10 +247,18 @@ private final class TailscaleAuthHandler: ChannelInboundHandler, @unchecked Send
 
 private final class TailscaleCommandHandler: ChannelInboundHandler {
   typealias InboundIn = SSHChannelData
-  let output: AsyncThrowingStream<ExecCommandOutput, Error>.Continuation
+  let output: AsyncThrowingStream<TailscaleOutput, Error>.Continuation
   private var exitCode: Int?
 
-  init(output: AsyncThrowingStream<ExecCommandOutput, Error>.Continuation) { self.output = output }
+  init(output: AsyncThrowingStream<TailscaleOutput, Error>.Continuation) { self.output = output }
+
+  func handlerAdded(context: ChannelHandlerContext) {
+    // OpenSSH may send EOF before exit-status. Keep receiving channel events
+    // until CLOSE rather than treating the half-close as a lost reply.
+    context.channel.setOption(ChannelOptions.allowRemoteHalfClosure, value: true).whenFailure {
+      context.fireErrorCaught($0)
+    }
+  }
 
   func channelRead(context: ChannelHandlerContext, data: NIOAny) {
     let chunk = unwrapInboundIn(data)

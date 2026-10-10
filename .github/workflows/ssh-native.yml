@@ -15,6 +15,10 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: modules/herdr-ssh/.build
+          key: ssh-${{ runner.os }}-${{ hashFiles('modules/herdr-ssh/Package.resolved') }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

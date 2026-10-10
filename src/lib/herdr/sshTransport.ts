@@ -26,6 +26,7 @@ import { withJsDeadline } from './timeouts';
 export class SshHerdrTransport implements HerdrTransport {
   /** Resolves once the first connect finishes, so callers never race it. */
   private opening: Promise<ConnectResult> | null = null;
+  private generation = 0;
 
   constructor(
     private readonly id: string,
@@ -46,10 +47,13 @@ export class SshHerdrTransport implements HerdrTransport {
    * produce one handshake rather than ten.
    */
   async open(): Promise<ConnectResult> {
+    const generation = this.generation;
+    const cancelled = (): ConnectResult => ({ ok: false, code: 'auth_cancelled', message: 'The SSH connection was cancelled.' });
     if (this.opening === null) {
       this.opening = this.loadConfig()
-        .then((config) => connect(this.id, config))
+        .then((config) => generation === this.generation ? connect(this.id, config) : cancelled())
         .then(async (result): Promise<ConnectResult> => {
+          if (generation !== this.generation) return cancelled();
           if (result.ok) {
             // A connection we cannot name is a connection we cannot pin. Storing
             // an empty fingerprint would read back as "no pin" — trust-on-first-
@@ -75,9 +79,10 @@ export class SshHerdrTransport implements HerdrTransport {
             // the usual reason is that the phone wasn't on the tailnet yet.
             this.opening = null;
           }
-          return result;
+          return generation === this.generation ? result : cancelled();
         })
         .catch(async (thrown: unknown): Promise<ConnectResult> => {
+          if (generation !== this.generation) return cancelled();
           // Everything before the handshake can throw — reading the config, a
           // keychain that will not answer. Without this the REJECTED promise
           // stays in `opening` and every later command on this host rejects
@@ -147,6 +152,7 @@ export class SshHerdrTransport implements HerdrTransport {
   }
 
   async close(): Promise<void> {
+    this.generation += 1;
     this.opening = null;
     await disconnect(this.id);
   }

@@ -256,7 +256,7 @@ export function clientFor(connection: ServerConnection): HerdrClient {
     connection.id,
     async () => {
       const [secret, pin] = await Promise.all([
-        loadSecret(connection.id),
+        connection.authKind === 'tailscale' ? Promise.resolve(null) : loadSecret(connection.id),
         loadHostKeyPin(connection.id),
       ]);
       if (connection.authKind !== 'tailscale' && (secret === null || secret.length === 0)) {
@@ -320,6 +320,8 @@ export function sshConfig(
  * form values. Uses its own id so a failed test can't poison the saved host's
  * live connection.
  */
+let nextTestConnection = 0;
+
 export function testClient(
   connection: ServerConnection,
   secret: string,
@@ -339,7 +341,7 @@ export function testClient(
     onFingerprint?: (fingerprint: string) => void;
   } = {}
 ): { client: HerdrClient; dispose: () => Promise<void> } {
-  const id = `test-${connection.id}`;
+  const id = `test-${connection.id}-${++nextTestConnection}`;
   const transport = new SshHerdrTransport(
     id,
     async () => {

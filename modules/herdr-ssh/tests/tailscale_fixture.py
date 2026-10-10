@@ -4,15 +4,19 @@ No tailnet credentials or real remote shell. Requires paramiko, installed only
 in the native CI job. A delay longer than Citadel's ten seconds catches the
 original check-mode failure.
 """
+import io
 import logging
 import socket
 import sys
 import threading
 import time
 import paramiko
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
 
 logging.disable(logging.CRITICAL)
-key = paramiko.RSAKey.generate(2048)
+key = paramiko.Ed25519Key(file_obj=io.StringIO(Ed25519PrivateKey.generate().private_bytes(
+    Encoding.PEM, PrivateFormat.OpenSSH, NoEncryption()).decode()))
 
 class Server(paramiko.ServerInterface):
     def get_banner(self):
@@ -48,6 +52,7 @@ class Server(paramiko.ServerInterface):
                 channel.sendall(b"first\nsec")
                 channel.sendall(b"ond\n")
                 channel.sendall_stderr(b"detail")
+                channel.shutdown_write()  # EOF may precede exit-status.
                 channel.send_exit_status(7 if command == b"fail" else 0)
                 channel.close()
             except (OSError, EOFError):
