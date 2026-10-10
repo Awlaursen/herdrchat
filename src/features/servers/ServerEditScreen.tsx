@@ -136,6 +136,7 @@ export default function ServerEditScreen() {
   });
 
   const resolveSecret = async (): Promise<string> => {
+    if (authKind === 'tailscale') return '';
     if (secret.length > 0) return secret;
     // Editing with the field left blank keeps the stored secret.
     return (await loadSecret(params.id)) ?? '';

@@ -1,6 +1,7 @@
 name: SSH native checks
 on:
   push:
+    branches: [main]
     paths: ['modules/herdr-ssh/**', '.github/workflows/ssh-native.yml']
   pull_request:
     paths: ['modules/herdr-ssh/**', '.github/workflows/ssh-native.yml']
@@ -26,11 +27,7 @@ jobs:
       - name: Build production SSH code
         run: swift build --package-path modules/herdr-ssh
       - name: Test check-mode lifecycle (bounded)
-        run: |
-          python3 modules/herdr-ssh/tests/tailscale_fixture.py 22265 > /tmp/ssh-fixture.log 2>&1 &
-          fixture_pid=$!
-          trap 'kill "$fixture_pid"' EXIT
-          TAILSCALE_TEST_PORT=22265 python3 -c 'import subprocess; subprocess.run(["modules/herdr-ssh/.build/debug/NativeChecks"], check=True, timeout=90)'
+        run: python3 modules/herdr-ssh/tests/run_native_checks.py
       - uses: actions/cache/save@v4
         if: always()
         with:
